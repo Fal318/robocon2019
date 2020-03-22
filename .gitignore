@@ -1,0 +1,6 @@
+.vscode/
+__pycache__/
+Data/*
+!Data/Video/
+!Data/Bag-file/
+!.gitkeep
