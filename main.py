@@ -71,63 +71,46 @@ try:
             mask_image, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
         )[0]
         areas = list(map(cv2.contourArea, contours))
-        results = list(map(cv2.moments, contours))
-        point_arr, pix_arr, length_arr, point_length_arr = [], [], [], []
-
-        for result in results:
-            if result["m00"] == 0:
+        moments = list(map(cv2.moments, contours))
+        area_data = []
+        for moment, area, contour in zip(moments, areas, contours):
+            if moment["m00"] == 0:
                 x, y = 0, 0
             else:
-                x = int(result["m10"] / result["m00"])
-                y = int(result["m01"] / result["m00"])
-            point_arr.append([x, y])
-
-        for i in range(len(point_arr)):
-            length = depth_frame.get_distance(point_arr[i][0], point_arr[i][1])
-            pix_arr.append(math.sqrt(areas[i]) * length)
-            length_arr.append(length)
-
-        while True:
-            if len(pix_arr) == 0:
-                break
-            arg = np.argmax(pix_arr)
-            if pix_arr[arg] <= pix_limit[0]:
-                break
-            elif pix_arr[arg] <= pix_limit[1]:
-                x, y = point_arr.pop(arg)
-                length = length_arr.pop(arg)
-                point_length_arr.append([x, y, length])
-                del pix_arr[arg], contours[arg]
-            elif pix_arr[arg] < pix_limit[2]:
-                x, y = point_arr.pop(arg)
-                contour = contours.pop(arg)
-                del pix_arr[arg], length_arr[arg]
+                x = int(moment["m10"] / moment["m00"])
+                y = int(moment["m01"] / moment["m00"])
+            length = depth_frame.get_distance(x, y)
+            processed_area = math.sqrt(area) * length
+            area_data.append([processed_area, [x, y], length, contour])
+            # pix_arr, point_arr, length_arr, contour
+        
+        area_data = [i for i in area_data if (i[0] > pix_limit[0]) and (i[0] < pix_limit[4])]
+        processed_data = []
+        for d in area_data:
+            arg = np.argmax(area_data, axis=0)
+            if d[0] <= pix_limit[1]:
+                x, y = d[1]
+                processed_data.append([x, y, d[2]])
+            elif processed_area[arg][0] < pix_limit[2] and processed_area[arg][0] > pix_limit[1]:
+                x, y = d[1]
+                contour = d[3]
                 leftmost = tuple(contour[contour[:, :, 0].argmin()][0])
                 rightmost = tuple(contour[contour[:, :, 0].argmax()][0])
                 difference = (rightmost[0] - leftmost[0]) // 4
-                truth_center = [[x - difference, y], [x + difference, y]]
+                truth_x = [x - difference, x + difference]
                 for i in range(2):
-                    point_arr.append(truth_center[i])
-                    length = depth_frame.get_distance(
-                        point_arr[i][0], point_arr[i][1])
-                    pix_arr.append(pix_limit[1])
-                    length_arr.append(length)
-                    contours.append([])
-            else:
-                del point_arr[arg]
-                del contours[arg]
-                del pix_arr[arg]
-                del length_arr[arg]
+                    length = depth_frame.get_distance(x, y)
+                    processed_data.append([truth_x[i], length])
 
         draw_image = [np.zeros((height, width, 3), np.uint8)]*4
 
-        if len(point_length_arr) == 0:
+        if len(processed_data) == 0:
             com.write(0)
         else:
-            point_length_arr = sorted(
-                point_length_arr, key=lambda x: abs(x[0])
+            processed_data = sorted(
+                processed_data, key=lambda x: abs(x[0])
             )
-            x, y, length = point_length_arr.pop(0)
+            x, y, length = processed_data.pop(0)
             distance, before_y, before_z = rs.rs2_deproject_pixel_to_point(
                 depth_stream, [x, y], length
             )
